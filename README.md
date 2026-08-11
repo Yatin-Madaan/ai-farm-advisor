@@ -18,6 +18,8 @@ The generated advisory is then formatted into a structured report containing:
 
 ## System Architecture
 
+![AI Farm Advisor System Architecture](docs/architecture.png)
+
 ```text
 Farmer
   │
