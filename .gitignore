@@ -1,2 +1,9 @@
 .DS_Store
 n8n/ai-farm-weather-agent-original.json
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
