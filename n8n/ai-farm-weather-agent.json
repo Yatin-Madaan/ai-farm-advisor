@@ -1,0 +1,485 @@
+{
+  "name": "AI Farm Weather Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "data = _items[0][\"json\"]\n\n# =========================\n# DAILY WEATHER\n# =========================\n\ndaily = data[\"daily\"]\n\ndaily_weather = []\n\nfor i in range(len(daily[\"time\"])):\n\n    temp_max = daily[\"temperature_2m_max\"][i]\n    rain = daily[\"precipitation_sum\"][i]\n    rain_probability = daily[\"precipitation_probability_max\"][i]\n    wind = daily[\"wind_speed_10m_max\"][i]\n    et0 = daily[\"et0_fao_evapotranspiration\"][i]\n\n    # General heat risk\n    if temp_max >= 35:\n        heat_risk = \"High\"\n    elif temp_max >= 30:\n        heat_risk = \"Moderate\"\n    else:\n        heat_risk = \"Low\"\n\n    # General rain risk\n    if rain_probability >= 60 or rain >= 10:\n        rain_risk = \"High\"\n    elif rain_probability >= 30 or rain >= 2:\n        rain_risk = \"Moderate\"\n    else:\n        rain_risk = \"Low\"\n\n    # General spraying suitability\n    if wind > 20 or rain_probability >= 50:\n        spray_suitability = \"Poor\"\n    else:\n        spray_suitability = \"Suitable\"\n\n    # General water demand\n    if et0 >= 5.5:\n        water_demand = \"High\"\n    elif et0 >= 4:\n        water_demand = \"Moderate\"\n    else:\n        water_demand = \"Low\"\n\n    daily_weather.append({\n        \"date\": daily[\"time\"][i],\n        \"temperature_max\": temp_max,\n        \"temperature_min\": daily[\"temperature_2m_min\"][i],\n        \"rain_mm\": rain,\n        \"rain_probability\": rain_probability,\n        \"wind_speed\": wind,\n        \"et0\": et0,\n        \"heat_risk\": heat_risk,\n        \"rain_risk\": rain_risk,\n        \"spray_suitability\": spray_suitability,\n        \"water_demand\": water_demand\n    })\n\n\n# =========================\n# HOURLY WEATHER\n# =========================\n\nhourly = data[\"hourly\"]\n\nhourly_weather = []\n\nfor i in range(len(hourly[\"time\"])):\n\n    hourly_weather.append({\n        \"time\": hourly[\"time\"][i],\n        \"temperature\": hourly[\"temperature_2m\"][i],\n        \"precipitation_probability\": hourly[\"precipitation_probability\"][i],\n        \"precipitation\": hourly[\"precipitation\"][i],\n        \"wind_speed\": hourly[\"wind_speed_10m\"][i]\n    })\n\n\n# =========================\n# OUTPUT\n# =========================\n\nreturn [{\n    \"json\": {\n        \"location\": {\n            \"latitude\": data[\"latitude\"],\n            \"longitude\": data[\"longitude\"],\n            \"timezone\": data[\"timezone\"]\n        },\n        \"farm_weather_daily\": daily_weather,\n        \"farm_weather_hourly\": hourly_weather\n    }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        320,
+        -144
+      ],
+      "id": "4f9705e4-a051-471b-ad2b-5a397a0ef261",
+      "name": "Process Weather Data"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        544,
+        -48
+      ],
+      "id": "ed7b6da6-3863-4682-9d94-ddf69969cabe",
+      "name": "Merge Farm Context"
+    },
+    {
+      "parameters": {
+        "language": "pythonNative",
+        "pythonCode": "data = _items[0][\"json\"]\n\n# =========================\n# FARM DATA\n# =========================\n\nfield_id = data.get(\"field_id\") or data.get(\"Field ID\")\n\ncrop = data.get(\"crop\") or data.get(\"Crop\")\n\nvariety = data.get(\"variety\") or data.get(\"Variety\")\n\ngrowth_stage = (\n    data.get(\"growth_stage\")\n    or data.get(\"Agronomical Stage\")\n    or data.get(\"Crop Agronomical Stage\")\n)\n\nirrigation = (\n    data.get(\"irrigation\")\n    or data.get(\"Irrigation System Available ?\")\n)\n\nplanting_date = (\n    data.get(\"planting_date\")\n    or data.get(\"Planting/Sowing Date\")\n)\n\nfield_area = (\n    data.get(\"area_ha\")\n    or data.get(\"field_area\")\n    or data.get(\"Field Area (ha)\")\n)\n\n# =========================\n# DAYS AFTER PLANTING\n# =========================\n\ndays_after_planting = None\n\nif planting_date:\n\n    current_date = \"2026-08-10\"\n\n    def date_to_days(date_string):\n        parts = date_string.split(\"-\")\n        year = int(parts[0])\n        month = int(parts[1])\n        day = int(parts[2])\n\n        y = year - 1\n\n        return (\n            365 * y\n            + y // 4\n            - y // 100\n            + y // 400\n            + ((367 * month - 362) // 12)\n            + day\n            - (\n                1\n                if month <= 2\n                else (\n                    1\n                    if (\n                        (year % 4 == 0 and year % 100 != 0)\n                        or year % 400 == 0\n                    )\n                    else 2\n                )\n            )\n        )\n\n    days_after_planting = (\n        date_to_days(current_date)\n        - date_to_days(planting_date)\n    )\n\n# =========================\n# WEATHER DATA\n# =========================\n\ndaily_weather = data.get(\"farm_weather_daily\", [])\n\ntoday_weather = {}\n\nif daily_weather:\n    today_weather = daily_weather[0]\n\ntemperature = today_weather.get(\"temperature_max\")\nrainfall = today_weather.get(\"rain_mm\")\nrain_probability = today_weather.get(\"rain_probability\")\net0 = today_weather.get(\"et0\")\nwind_speed = today_weather.get(\"wind_speed\")\n\n# =========================\n# OUTPUT\n# =========================\n\nreturn [{\n    \"json\": {\n        \"field_id\": field_id,\n        \"crop\": crop,\n        \"variety\": variety,\n        \"growth_stage\": growth_stage,\n        \"irrigation\": irrigation,\n        \"planting_date\": planting_date,\n        \"field_area\": field_area,\n        \"days_after_planting\": days_after_planting,\n\n        \"temperature\": temperature,\n        \"rainfall\": rainfall,\n        \"rain_probability\": rain_probability,\n        \"et0\": et0,\n        \"wind_speed\": wind_speed,\n\n        \"farm_weather_daily\": daily_weather,\n        \"farm_weather_hourly\": data.get(\"farm_weather_hourly\", [])\n    }\n}]"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        -48
+      ],
+      "id": "90cc2150-e82f-4e13-bf45-a47aeb54ed8f",
+      "name": "Prepare AI Input"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/advisory",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        944,
+        -48
+      ],
+      "id": "c56a4abb-419f-479d-a429-c27ee4ae22ba",
+      "name": "AI Farm Analysis"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\n// =====================================================\n// HELPER FUNCTIONS\n// =====================================================\n\nfunction escapeHtml(value) {\n  return String(value ?? \"\")\n    .replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\")\n    .replace(/>/g, \"&gt;\")\n    .replace(/\"/g, \"&quot;\")\n    .replace(/'/g, \"&#039;\");\n}\n\n\n// =====================================================\n// MARKDOWN → HTML\n// =====================================================\n\nfunction markdownToHtml(text) {\n\n  if (!text) return \"\";\n\n  let html = escapeHtml(text);\n\n  // Bold\n  html = html.replace(\n    /\\*\\*(.*?)\\*\\*/g,\n    \"<strong>$1</strong>\"\n  );\n\n  // Evidence references\n  html = html.replace(\n    /\\[Evidence ([^\\]]+)\\]/g,\n    `<span style=\"\n      display:inline-block;\n      background:#e8f5e9;\n      color:#166534;\n      padding:2px 7px;\n      border-radius:10px;\n      font-size:10px;\n      font-weight:600;\n      margin-left:3px;\n      white-space:nowrap;\n    \">Evidence $1</span>`\n  );\n\n  // Remove remaining markdown bullets\n  html = html.replace(\n    /^[-•]\\s*/g,\n    \"\"\n  );\n\n  return html;\n}\n\n\n// =====================================================\n// CLEAN LINES\n// =====================================================\n\nfunction cleanLines(text) {\n\n  if (!text) return [];\n\n  return text\n    .split(/\\n+/)\n    .map(line => line.trim())\n    .filter(line => line.length > 0)\n    .map(line => {\n\n      // Remove markdown bullet\n      line = line.replace(/^[-•]\\s*/, \"\");\n\n      // Remove accidental numbered prefixes\n      line = line.replace(/^\\d+[\\.\\)]\\s*/, \"\");\n\n      return line.trim();\n    })\n    .filter(Boolean);\n}\n\n\n// =====================================================\n// GET RAG ADVISORY\n// =====================================================\n\nconst advisory = data.advisory || \"\";\n\n\n// =====================================================\n// EXTRACT SECTIONS\n// =====================================================\n\nfunction getSection(start, end) {\n\n  const upper = advisory.toUpperCase();\n\n  const startIndex = upper.indexOf(start);\n\n  if (startIndex === -1) {\n    return \"\";\n  }\n\n  const contentStart = startIndex + start.length;\n\n  const endIndex = end\n    ? upper.indexOf(end, contentStart)\n    : advisory.length;\n\n  return advisory\n    .substring(\n      contentStart,\n      endIndex === -1 ? advisory.length : endIndex\n    )\n    .trim();\n}\n\n\nconst assessment = getSection(\n  \"### ASSESSMENT\",\n  \"### RECOMMENDATIONS\"\n);\n\nconst recommendations = getSection(\n  \"### RECOMMENDATIONS\",\n  \"### LIMITATIONS\"\n);\n\nconst limitations = getSection(\n  \"### LIMITATIONS\",\n  null\n);\n\n\n// =====================================================\n// ASSESSMENT HTML\n// =====================================================\n\nfunction assessmentHtml(text) {\n\n  const lines = cleanLines(text);\n\n  if (!lines.length) {\n\n    return `\n      <div style=\"\n        padding:12px 0;\n        color:#64748b;\n        font-size:13px;\n      \">\n        No assessment available.\n      </div>\n    `;\n  }\n\n  return lines.map(line => {\n\n    return `\n      <div style=\"\n        padding:7px 0;\n        color:#334155;\n        font-size:13px;\n        line-height:1.55;\n      \">\n        ${markdownToHtml(line)}\n      </div>\n    `;\n\n  }).join(\"\");\n}\n\n\n// =====================================================\n// RECOMMENDATION HTML\n// =====================================================\n\nfunction recommendationHtml(text) {\n\n  const lines = cleanLines(text);\n\n  if (!lines.length) {\n\n    return `\n      <div style=\"\n        padding:12px 0;\n        color:#64748b;\n        font-size:13px;\n      \">\n        No recommendations available.\n      </div>\n    `;\n  }\n\n  return `\n\n    <table\n      width=\"100%\"\n      cellpadding=\"0\"\n      cellspacing=\"0\"\n      border=\"0\"\n      style=\"\n        border-collapse:collapse;\n        width:100%;\n      \"\n    >\n\n      <tr>\n\n        <td\n          width=\"42\"\n          style=\"\n            padding:0 8px 8px 0;\n            color:#64748b;\n            font-size:10px;\n            font-weight:700;\n            text-transform:uppercase;\n          \"\n        >\n          #\n        </td>\n\n        <td\n          style=\"\n            padding:0 0 8px 4px;\n            color:#64748b;\n            font-size:10px;\n            font-weight:700;\n            text-transform:uppercase;\n          \"\n        >\n          Recommendation\n        </td>\n\n      </tr>\n\n\n      ${lines.map((line, index) => `\n\n        <tr>\n\n          <!-- NUMBER -->\n\n          <td\n            width=\"42\"\n            valign=\"top\"\n            align=\"center\"\n            style=\"\n              padding:10px 8px 10px 0;\n              border-top:1px solid #e2e8f0;\n            \"\n          >\n\n            <div style=\"\n              width:28px;\n              height:28px;\n              line-height:28px;\n              border-radius:50%;\n              background:#dcfce7;\n              color:#166534;\n              font-size:11px;\n              font-weight:700;\n              text-align:center;\n            \">\n              ${String(index + 1).padStart(2, \"0\")}\n            </div>\n\n          </td>\n\n\n          <!-- TEXT -->\n\n          <td\n            valign=\"top\"\n            style=\"\n              padding:10px 4px 10px 8px;\n              border-top:1px solid #e2e8f0;\n              color:#334155;\n              font-size:13px;\n              line-height:1.55;\n            \"\n          >\n\n            ${markdownToHtml(line)}\n\n          </td>\n\n        </tr>\n\n      `).join(\"\")}\n\n    </table>\n\n  `;\n}\n\n\n// =====================================================\n// LIMITATIONS HTML\n// =====================================================\n\nfunction limitationHtml(text) {\n\n  const lines = cleanLines(text);\n\n  if (!lines.length) {\n\n    return `\n      <div style=\"\n        padding:12px 0;\n        color:#64748b;\n        font-size:13px;\n      \">\n        No limitations available.\n      </div>\n    `;\n  }\n\n  return lines.map(line => {\n\n    return `\n      <div style=\"\n        padding:9px 11px;\n        margin-bottom:8px;\n        background:#fffbeb;\n        border:1px solid #fde68a;\n        border-radius:8px;\n        color:#78350f;\n        font-size:12px;\n        line-height:1.5;\n      \">\n        ⚠️ ${markdownToHtml(line)}\n      </div>\n    `;\n\n  }).join(\"\");\n}\n\n\n// =====================================================\n// FIELD VALUES\n// =====================================================\n\n// IMPORTANT:\n// RAG response structure is:\n//\n// data\n// ├── farm\n// │   ├── crop\n// │   ├── variety\n// │   ├── growth_stage\n// │   └── days_after_planting\n// │\n// └── weather\n//     ├── temperature\n//     ├── et0\n//     ├── rainfall\n//     └── rain_probability\n\n\nconst farm = data.farm || {};\nconst weather = data.weather || {};\n\n\n// Crop\nconst crop = escapeHtml(\n  farm.crop || data.crop || \"Crop\"\n);\n\n\n// Variety\nconst variety = escapeHtml(\n  farm.variety || data.variety || \"\"\n);\n\n\n// Growth stage\nconst growthStage = escapeHtml(\n  farm.growth_stage ||\n  data.growth_stage ||\n  \"—\"\n);\n\n\n// Days after planting\nconst days = escapeHtml(\n  farm.days_after_planting ??\n  data.days_after_planting ??\n  \"—\"\n);\n\n\n// Temperature\nconst temperature = escapeHtml(\n  weather.temperature ??\n  data.temperature ??\n  \"—\"\n);\n\n\n// ET0\nconst et0 = escapeHtml(\n  weather.et0 ??\n  data.et0 ??\n  \"—\"\n);\n\n\n// Rainfall\nconst rainfall = escapeHtml(\n  weather.rainfall ??\n  data.rainfall ??\n  \"—\"\n);\n\n\n// Rain probability\nconst rainProbability = escapeHtml(\n  weather.rain_probability ??\n  data.rain_probability ??\n  \"—\"\n);\n\n\n// =====================================================\n// FIELD SUMMARY\n// =====================================================\n\nconst fieldSummary = `\n\n<table\n  width=\"100%\"\n  cellpadding=\"0\"\n  cellspacing=\"0\"\n  border=\"0\"\n  style=\"\n    width:100%;\n    border-collapse:separate;\n    border-spacing:6px;\n    margin:4px 0 20px 0;\n  \"\n>\n\n  <tr>\n\n    <!-- GROWTH STAGE -->\n\n    <td\n      width=\"25%\"\n      valign=\"top\"\n      align=\"center\"\n      style=\"\n        background:#f8fafc;\n        border:1px solid #e2e8f0;\n        border-radius:8px;\n        padding:10px 5px;\n      \"\n    >\n\n      <div style=\"\n        font-size:9px;\n        color:#64748b;\n        text-transform:uppercase;\n        font-weight:700;\n        margin-bottom:5px;\n      \">\n        Growth Stage\n      </div>\n\n      <div style=\"\n        font-size:13px;\n        color:#166534;\n        font-weight:700;\n      \">\n        ${growthStage}\n      </div>\n\n    </td>\n\n\n    <!-- DAYS -->\n\n    <td\n      width=\"25%\"\n      valign=\"top\"\n      align=\"center\"\n      style=\"\n        background:#f8fafc;\n        border:1px solid #e2e8f0;\n        border-radius:8px;\n        padding:10px 5px;\n      \"\n    >\n\n      <div style=\"\n        font-size:9px;\n        color:#64748b;\n        text-transform:uppercase;\n        font-weight:700;\n        margin-bottom:5px;\n      \">\n        Days After Planting\n      </div>\n\n      <div style=\"\n        font-size:13px;\n        color:#166534;\n        font-weight:700;\n      \">\n        ${days}\n      </div>\n\n    </td>\n\n\n    <!-- TEMPERATURE -->\n\n    <td\n      width=\"25%\"\n      valign=\"top\"\n      align=\"center\"\n      style=\"\n        background:#f8fafc;\n        border:1px solid #e2e8f0;\n        border-radius:8px;\n        padding:10px 5px;\n      \"\n    >\n\n      <div style=\"\n        font-size:9px;\n        color:#64748b;\n        text-transform:uppercase;\n        font-weight:700;\n        margin-bottom:5px;\n      \">\n        Temperature\n      </div>\n\n      <div style=\"\n        font-size:13px;\n        color:#b45309;\n        font-weight:700;\n      \">\n        ${temperature} °C\n      </div>\n\n    </td>\n\n\n    <!-- ET0 -->\n\n    <td\n      width=\"25%\"\n      valign=\"top\"\n      align=\"center\"\n      style=\"\n        background:#f8fafc;\n        border:1px solid #e2e8f0;\n        border-radius:8px;\n        padding:10px 5px;\n      \"\n    >\n\n      <div style=\"\n        font-size:9px;\n        color:#64748b;\n        text-transform:uppercase;\n        font-weight:700;\n        margin-bottom:5px;\n      \">\n        ET₀\n      </div>\n\n      <div style=\"\n        font-size:13px;\n        color:#0369a1;\n        font-weight:700;\n      \">\n        ${et0} mm/day\n      </div>\n\n    </td>\n\n  </tr>\n\n</table>\n\n`;\n\n\n// =====================================================\n// FINAL HTML\n// =====================================================\n\nconst html = `\n\n<div style=\"\n  width:100%;\n  max-width:760px;\n  margin:0 auto;\n  padding:24px;\n  box-sizing:border-box;\n  font-family:Arial,Helvetica,sans-serif;\n  color:#1e293b;\n  background:#ffffff;\n\">\n\n\n  <!-- ============================================= -->\n  <!-- HEADER -->\n  <!-- ============================================= -->\n\n  <div style=\"\n    text-align:center;\n    margin-bottom:22px;\n  \">\n\n    <div style=\"\n      font-size:11px;\n      text-transform:uppercase;\n      letter-spacing:1.5px;\n      color:#64748b;\n      margin-bottom:6px;\n    \">\n      AI Farm Advisory\n    </div>\n\n\n    <div style=\"\n      font-size:26px;\n      font-weight:700;\n      color:#166534;\n      margin-bottom:5px;\n    \">\n      🌾 Agricultural Advisory\n    </div>\n\n\n    <div style=\"\n      font-size:13px;\n      color:#64748b;\n    \">\n      ${crop}${variety ? ` · Variety ${variety}` : \"\"}\n    </div>\n\n  </div>\n\n\n  <!-- ============================================= -->\n  <!-- FIELD SUMMARY -->\n  <!-- ============================================= -->\n\n  ${fieldSummary}\n\n\n  <!-- ============================================= -->\n  <!-- ASSESSMENT -->\n  <!-- ============================================= -->\n\n  <div style=\"\n    margin-top:8px;\n    margin-bottom:18px;\n  \">\n\n    <div style=\"\n      font-size:16px;\n      font-weight:700;\n      color:#1e293b;\n      margin-bottom:8px;\n      padding-bottom:7px;\n      border-bottom:2px solid #dcfce7;\n    \">\n      🌤 Assessment\n    </div>\n\n    <div>\n      ${assessmentHtml(assessment)}\n    </div>\n\n  </div>\n\n\n  <!-- ============================================= -->\n  <!-- RECOMMENDATIONS -->\n  <!-- ============================================= -->\n\n  <div style=\"\n    margin-top:22px;\n    margin-bottom:18px;\n  \">\n\n    <div style=\"\n      font-size:16px;\n      font-weight:700;\n      color:#1e293b;\n      margin-bottom:10px;\n      padding-bottom:7px;\n      border-bottom:2px solid #dcfce7;\n    \">\n      💧 Recommendations\n    </div>\n\n    ${recommendationHtml(recommendations)}\n\n  </div>\n\n\n  <!-- ============================================= -->\n  <!-- LIMITATIONS -->\n  <!-- ============================================= -->\n\n  <div style=\"\n    margin-top:22px;\n    margin-bottom:12px;\n  \">\n\n    <div style=\"\n      font-size:16px;\n      font-weight:700;\n      color:#1e293b;\n      margin-bottom:10px;\n      padding-bottom:7px;\n      border-bottom:2px solid #fef3c7;\n    \">\n      ⚠️ Limitations\n    </div>\n\n    ${limitationHtml(limitations)}\n\n  </div>\n\n\n  <!-- ============================================= -->\n  <!-- FOOTER -->\n  <!-- ============================================= -->\n\n  <div style=\"\n    margin-top:22px;\n    padding-top:12px;\n    border-top:1px solid #e2e8f0;\n    text-align:center;\n    color:#94a3b8;\n    font-size:10px;\n    line-height:1.5;\n  \">\n    AI-generated agricultural advisory based on submitted\n    field data and available evidence.\n  </div>\n\n\n</div>\n\n`;\n\n\n// =====================================================\n// OUTPUT\n// =====================================================\n\nreturn [\n  {\n    json: {\n      html\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1168,
+        -48
+      ],
+      "id": "7b9d885e-ebb3-4ec3-a759-eb013a4ab807",
+      "name": "Format Recommendation"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ffbe9388-d5a8-4f39-b2ce-909310125dd8",
+              "name": "field",
+              "value": "=F001",
+              "type": "string"
+            },
+            {
+              "id": "64b14934-dd47-4396-9db6-c3dfce185055",
+              "name": "=field_id",
+              "value": "=F001-01",
+              "type": "string"
+            },
+            {
+              "id": "7aef24b6-a8ce-4c80-bf6b-1f6442a37595",
+              "name": "=crop",
+              "value": "={{ $('Recommendation Form').item.json[\"Crop\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "5f66dd0f-af6a-4c9a-9f5f-dc19df3ca039",
+              "name": "=growth_stage",
+              "value": "={{ $('Recommendation Form').item.json[\"Agronomical Stage\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "c261e12a-0b04-4a03-b248-1a40d26cad20",
+              "name": "=area_ha",
+              "value": "={{ $('Recommendation Form').item.json[\"Field Area (ha)\"] }}",
+              "type": "number"
+            },
+            {
+              "id": "7313bce1-24a7-4e32-8a64-407f45948ad9",
+              "name": "=irrigation",
+              "value": "={{ $('Recommendation Form').item.json[\"Irrigation System Available ?\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "0025cac2-82a3-46a4-9afc-75e24f2b4d49",
+              "name": "=planting_date",
+              "value": "={{ $('Recommendation Form').item.json[\"Planting/Sowing Date\"] }}",
+              "type": "string"
+            },
+            {
+              "id": "337a903a-0073-4bde-96b3-c30d8fe1efc3",
+              "name": "growth_stage_mode",
+              "value": "=automatic",
+              "type": "string"
+            },
+            {
+              "id": "3c3aae05-a8ac-43eb-b950-0ef46b7a9efd",
+              "name": "=variety",
+              "value": "={{ $('Recommendation Form').item.json[\"Variety\"] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        320,
+        16
+      ],
+      "id": "7fb837a1-b915-4708-bf2e-e575ef92a6f9",
+      "name": "Prepare Farm Context"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        96,
+        -144
+      ],
+      "id": "ca989500-4740-4980-b442-dbd54261960d",
+      "name": "Prepare Weather Data"
+    },
+    {
+      "parameters": {
+        "formTitle": "Agricultural Farm Advisory",
+        "formDescription": "Enter your farm and crop information to receive an AI-powered agricultural advisory.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Field ID"
+            },
+            {
+              "fieldLabel": "Crop"
+            },
+            {
+              "fieldLabel": "Variety"
+            },
+            {
+              "fieldLabel": "Agronomical Stage"
+            },
+            {
+              "fieldLabel": "Irrigation System Available ?",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Yes"
+                  },
+                  {
+                    "option": "No"
+                  }
+                ]
+              }
+            },
+            {
+              "fieldLabel": "Planting/Sowing Date",
+              "fieldType": "date"
+            },
+            {
+              "fieldLabel": "Field Area (ha)",
+              "fieldType": "number"
+            },
+            {
+              "fieldLabel": "Postal / ZIP Code",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Country Code",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        -384,
+        16
+      ],
+      "id": "191d2df0-283a-41c2-8eeb-394c67fde77a",
+      "name": "Recommendation Form"
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText",
+        "responseText": "={{ $('Format Recommendation').item.json.html }}"
+      },
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        1312,
+        -48
+      ],
+      "id": "2217e32e-0c8b-4373-a952-6283d0079116",
+      "name": "Return Recommendation"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    table_name\nFROM information_schema.tables\nWHERE table_schema = 'public'\n  AND table_name IN (\n      'farmers',\n      'fields',\n      'crop_cycles',\n      'sensors',\n      'sensor_readings',\n      'advisories'\n  )\nORDER BY table_name;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1520,
+        -64
+      ],
+      "id": "0ed4ee6a-35c6-4e54-876c-233e9a17a56d",
+      "name": "Store Advisory"
+    },
+    {
+      "parameters": {
+        "url": "https://api.open-meteo.com/v1/forecast",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "latitude",
+              "value": "={{ $('Get Farm Context').item.json.lat }}"
+            },
+            {
+              "name": "longitude",
+              "value": "={{ $('Get Farm Context').item.json.lon }}"
+            },
+            {
+              "name": "current",
+              "value": "temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m"
+            },
+            {
+              "name": "hourly",
+              "value": "temperature_2m,precipitation_probability,precipitation,wind_speed_10m"
+            },
+            {
+              "name": "daily",
+              "value": "temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,et0_fao_evapotranspiration"
+            },
+            {
+              "name": "timezone",
+              "value": "auto"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -80,
+        -144
+      ],
+      "id": "88e0f134-6186-4c3b-9615-9174d70c29ed",
+      "name": "Get Weather Data"
+    },
+    {
+      "parameters": {
+        "url": "https://nominatim.openstreetmap.org/search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json[\"Postal / ZIP Code\"] + \", \" + $json[\"Country Code\"] }}"
+            },
+            {
+              "name": "format",
+              "value": "json"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            },
+            {
+              "name": "countrycodes",
+              "value": "de"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        80,
+        16
+      ],
+      "id": "51d33883-5101-4ce4-ada0-a7df53a8447c",
+      "name": "Get Farm Context"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Process Weather Data": {
+      "main": [
+        [
+          {
+            "node": "Merge Farm Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Farm Context": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Input": {
+      "main": [
+        [
+          {
+            "node": "AI Farm Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Farm Analysis": {
+      "main": [
+        [
+          {
+            "node": "Format Recommendation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Recommendation": {
+      "main": [
+        [
+          {
+            "node": "Return Recommendation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Farm Context": {
+      "main": [
+        [
+          {
+            "node": "Merge Farm Context",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Get Weather Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Weather Data": {
+      "main": [
+        [
+          {
+            "node": "Process Weather Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recommendation Form": {
+      "main": [
+        [
+          {
+            "node": "Get Farm Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return Recommendation": {
+      "main": [
+        [
+          {
+            "node": "Store Advisory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Weather Data": {
+      "main": [
+        [
+          {
+            "node": "Prepare Weather Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Farm Context": {
+      "main": [
+        [
+          {
+            "node": "Prepare Farm Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Advisory": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "a05e1670-9d60-41ee-b87a-9c4357644619",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "id": "VL6iRqCcDJZwfrSR",
+  "tags": []
+}
